@@ -16,6 +16,7 @@ boundary through an asyncio.Queue fed via call_soon_threadsafe."""
 from __future__ import annotations
 import asyncio
 import json
+import os
 import threading
 from concurrent.futures import Future
 
@@ -25,13 +26,26 @@ _STOP = object()
 
 
 class MCPGraphClient(GraphClient):
-    def __init__(self, host="http://127.0.0.1", rest=9000, gs=14240, user="tigergraph", pw="tigergraph", graphname="FraudGraph"):
+    def __init__(self, host=None, rest=None, gs=None, user=None, pw=None, graphname=None):
         self.calls = 0
         self.log: list[str] = []
         self._cache: dict = {}
-        self.graphname = graphname
-        env = {"TG_HOST": host, "TG_USERNAME": user, "TG_PASSWORD": pw,
-               "TG_GRAPHNAME": graphname, "TG_RESTPP_PORT": str(rest), "TG_GS_PORT": str(gs)}
+        self.graphname = graphname or os.environ.get("TG_GRAPHNAME", "FraudGraph")
+        # Explicit args win; otherwise fall through to whatever's already in the
+        # process environment (e.g. loaded from .env), so a tgcloud profile
+        # (TG_HOST/TG_SECRET/TG_TGCLOUD) works without hardcoding local docker defaults.
+        env = {"TG_GRAPHNAME": self.graphname}
+        for key, val, fallback in (
+            ("TG_HOST", host, "http://127.0.0.1"),
+            ("TG_USERNAME", user, "tigergraph"),
+            ("TG_PASSWORD", pw, "tigergraph"),
+            ("TG_RESTPP_PORT", rest, "9000"),
+            ("TG_GS_PORT", gs, "14240"),
+        ):
+            env[key] = str(val) if val is not None else os.environ.get(key, fallback)
+        for passthrough in ("TG_SECRET", "TG_SSL_PORT", "TG_TGCLOUD", "TG_API_TOKEN", "TG_JWT_TOKEN"):
+            if passthrough in os.environ:
+                env[passthrough] = os.environ[passthrough]
 
         self._loop = asyncio.new_event_loop()
         self._queue: asyncio.Queue | None = None
